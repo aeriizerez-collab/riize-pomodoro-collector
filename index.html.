@@ -74,6 +74,11 @@ const MEMBERS=["SHOTARO","EUNSEOK","SUNGCHAN","WONBIN","SOHEE","ANTON"];
 const EMOJI={SHOTARO:"🧋",EUNSEOK:"🪨",SUNGCHAN:"🦌",WONBIN:"🎸",SOHEE:"💂",ANTON:"🦖"};
 const RARITIES=["Common","Rare","Super Rare","Legendary"];
 const $=id=>document.getElementById(id);
+// Configuração pública do projeto Supabase. A chave publishable pode ficar no navegador
+// quando o banco e o Storage estão protegidos por políticas RLS adequadas.
+const SUPABASE_URL = "https://gkmtajjoglmadojwuzfp.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_7xDLD2_I8MAg7KnKj5PRrg_OGt3lY9b";
+const STORAGE_BUCKET = "photocards"; // Altere se o bucket tiver outro nome.
 let photos=[], owned={}, duplicates=0, sessions=0, totalMinutes=0, activeFilter="Todos";
 let supabase=null, isAdmin=false, currentUser=null, realtimeChannel=null;
 let mode="focus", remaining=25*60, interval=null, running=false;
@@ -81,36 +86,151 @@ function loadStats(){try{const s=JSON.parse(localStorage.getItem("riizeStats")||
 function saveStats(){try{localStorage.setItem("riizeStats",JSON.stringify({owned,duplicates,sessions,totalMinutes}))}catch(e){}}
 function escapeHTML(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function initials(n){return n==="SHOTARO"?"SH":n.slice(0,2)}
-function cardVisual(photo){return `<div class="card-img">${photo?`<img src="${photo.url}" alt="${escapeHTML(photo.member)} photocard" loading="lazy">`:`<div class="placeholder"><strong>${initials(photo?.member||"RIIZE")}</strong><span>RIIZE · PHOTO CARD</span></div>`}</div>`}
+function cardVisual(photo){return `<div class="card-img">${photo?`<img src="${escapeHTML(photo.url)}" alt="${escapeHTML(photo.member)} photocard" loading="lazy">`:`<div class="placeholder"><strong>${initials(photo?.member||"RIIZE")}</strong><span>RIIZE · PHOTO CARD</span></div>`}</div>`}
 function rarityFor(){let r=Math.random();return r<.58?"Common":r<.86?"Rare":r<.98?"Super Rare":"Legendary"}
 function updateStats(){$("sessions").textContent=sessions;$("owned").textContent=Object.keys(owned).filter(k=>owned[k]>0).length;$("minutes").textContent=totalMinutes;$("dupes").textContent=duplicates}
 function drawMembers(){$("memberGrid").innerHTML=MEMBERS.map(m=>`<div class="member"><div class="avatar">${EMOJI[m]}</div><b>${m}</b><small>${photos.filter(p=>p.member===m).length} fotos no álbum</small></div>`).join("")}
 function drawFilters(){$("filterTabs").innerHTML=["Todos",...MEMBERS].map(m=>`<button data-filter="${m}" class="${activeFilter===m?"active":""}">${m}</button>`).join("");document.querySelectorAll("[data-filter]").forEach(b=>b.onclick=()=>{activeFilter=b.dataset.filter;drawCollection()})}
-function drawCollection(){drawFilters();let filtered=photos.filter(p=>(activeFilter==="Todos"||p.member===activeFilter));let count=photos.reduce((a,p)=>a+(owned[p.id]||0),0);let pct=photos.length?Math.round(count/photos.length*100):0;$("collectionCount").textContent=`${count} photocards recebidos · ${photos.length} modelos cadastrados`;$("progressText").textContent=pct+"%";$("progressBar").style.width=Math.min(100,pct)+"%";$("collectionGrid").innerHTML=filtered.length?filtered.map(p=>`<div class="card">${cardVisual(p)}<div class="card-meta"><b>${p.member}</b><small>${owned[p.id]?"Recebido ×"+owned[p.id]:"Ainda não recebido"}</small><span class="rarity">${p.rarity||"Surpresa"}</span></div></div>`).join(""):`<div class="empty" style="grid-column:1/-1">${emptyMsg()}</div>`}
+function drawCollection(){drawFilters();let filtered=photos.filter(p=>(activeFilter==="Todos"||p.member===activeFilter));let count=photos.reduce((a,p)=>a+(owned[p.id]||0),0);let unique=photos.filter(p=>(owned[p.id]||0)>0).length;let pct=photos.length?Math.round(unique/photos.length*100):0;$("collectionCount").textContent=`${count} photocards recebidos · ${photos.length} modelos cadastrados`;$("progressText").textContent=pct+"%";$("progressBar").style.width=Math.min(100,pct)+"%";$("collectionGrid").innerHTML=filtered.length?filtered.map(p=>`<div class="card">${cardVisual(p)}<div class="card-meta"><b>${p.member}</b><small>${owned[p.id]?"Recebido ×"+owned[p.id]:"Ainda não recebido"}</small><span class="rarity">${p.rarity||"Surpresa"}</span></div></div>`).join(""):`<div class="empty" style="grid-column:1/-1">${emptyMsg()}</div>`}
 function drawAvailable(){const grid=$("availableGrid");if(!grid)return;grid.innerHTML=photos.length?photos.map(p=>`<div class="card">${cardVisual(p)}<div class="card-meta"><b>${p.member}</b><select data-rarity="${p.id}" style="margin-top:5px;width:100%;padding:5px;border:1px solid var(--line);border-radius:8px;font-size:10px;background:white;color:var(--ink)">${RARITIES.map(r=>`<option${r===p.rarity?" selected":""}>${r}</option>`).join("")}</select><button class="secondary" style="padding:6px 9px;margin-top:7px;font-size:10px" data-delete="${p.id}">Remover</button></div></div>`).join(""):`<div class="empty" style="grid-column:1/-1">${emptyMsg()}</div>`;document.querySelectorAll("[data-delete]").forEach(b=>b.onclick=async()=>{if(confirm("Remover este photocard do catálogo compartilhado?"))await deletePhoto(b.dataset.delete)});document.querySelectorAll("[data-rarity]").forEach(sel=>sel.onchange=async()=>{const {error}=await supabase.from("photocards").update({rarity:sel.value}).eq("id",sel.dataset.rarity);if(error)alert("Não foi possível atualizar a raridade: "+error.message)})}
 function refresh(){drawPlayer();drawCoverage();drawMembers();drawCollection();drawAvailable();updateStats()}
 function drawPlayer(){const box=$("playerBox");if(!box)return;box.innerHTML=`<div style="margin-top:10px"><iframe data-testid="embed-iframe" style="border-radius:12px" src="https://open.spotify.com/embed/playlist/56mNjy4K55cIY2ZbNXPark?utm_source=generator&si=79c52f381d7244fb" width="100%" height="352" frameBorder="0" allowfullscreen="" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe></div>`}
 function drawCoverage(){const el=$("rarityCoverage");if(!el)return;el.innerHTML=`<div class="eyebrow" style="margin-bottom:8px">SUPER RARE E LEGENDARY POR MEMBRO</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">`+MEMBERS.map(m=>{const has=r=>photos.some(p=>p.member===m&&p.rarity===r);const chip=r=>`<span style="font-size:10px;padding:3px 8px;border-radius:99px;background:${has(r)?"#fbd3b0":"#f5e4cc"};color:${has(r)?"#7a4520":"#a8917a"}">${has(r)?"✓":"faltando"} ${r}</span>`;return`<div style="background:#fff7ec;border-radius:14px;padding:10px"><b style="font-size:11px">${EMOJI[m]} ${m}</b><div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">${chip("Super Rare")}${chip("Legendary")}</div></div>`}).join("")+`</div>`}
 function emptyMsg(){if(!supabase)return"Configure o Supabase para carregar o álbum compartilhado.";return photos.length?"":(isAdmin?"O álbum está esperando pelas primeiras fotos!":"O álbum ainda não tem photocards. Volte em breve!")}
-function setAdminUI(){ $("adminLogin").hidden=isAdmin; $("adminTools").hidden=!isAdmin; $("manageTab").hidden=false; if(isAdmin)$("adminIdentity").textContent="Conectado: "+(currentUser?.email||"administrador");refresh();}
-async function deletePhoto(id){const p=photos.find(x=>x.id===id);if(!p)return;const {error}=await supabase.from("photocards").delete().eq("id",id);if(error){alert("Erro ao remover: "+error.message);return}if(p.storage_path){const {error:storageError}=await supabase.storage.from(STORAGE_BUCKET).remove([p.storage_path]);if(storageError)console.warn("Registro removido, mas o arquivo ficou no Storage:",storageError.message)}}
-async function loadPhotos(){const {data,error}=await supabase.from("photocards").select("*").order("created_at",{ascending:true});if(error){console.error(error);$("collectionGrid").innerHTML=`<div class="empty" style="grid-column:1/-1">Não foi possível carregar o álbum. Verifique a configuração e as políticas do Supabase.</div>`;return}photos=(data||[]).map(p=>({...p,url:supabase.storage.from(STORAGE_BUCKET).getPublicUrl(p.storage_path).data.publicUrl}));refresh()}
-async function checkAdmin(session){currentUser=session?.user||null;isAdmin=!!currentUser&&currentUser.app_metadata?.role==="admin";setAdminUI();if(currentUser&&!isAdmin){$("loginStatus").textContent="Esta conta não tem permissão administrativa.";await supabase.auth.signOut();currentUser=null;isAdmin=false;setAdminUI()}}
-async function uploadPhotos(){const files=[...$("photoFiles").files],member=$("uploadMember").value;if(!files.length){$("uploadStatus").textContent="Escolha pelo menos uma imagem.";return}$("uploadBtn").disabled=true;let added=0,failed=0;for(const f of files){if(!f.type.startsWith("image/")){failed++;continue}try{const safe=f.name.normalize("NFKD").replace(/[^a-zA-Z0-9._-]/g,"-");const path=`${crypto.randomUUID()}-${safe}`;const up=await supabase.storage.from(STORAGE_BUCKET).upload(path,f,{contentType:f.type,upsert:false});if(up.error)throw up.error;const row=await supabase.from("photocards").insert({member,name:f.name,storage_path:path,rarity:$("uploadRarity").value});if(row.error){await supabase.storage.from(STORAGE_BUCKET).remove([path]);throw row.error}added++}catch(e){console.error(e);failed++}}$("uploadBtn").disabled=false;$("photoFiles").value="";$("uploadStatus").textContent=`${added} photocard(s) adicionado(s)!`+(failed?` ${failed} arquivo(s) falharam.`:"");}
-function setMode(m){pause();mode=m;let mins=m==="focus"?Number($("focusLength").value||25):m==="short"?5:15;remaining=mins*60;$("modeTitle").textContent=m==="focus"?"Hora de estudar":m==="short"?"Pausa curta":"Pausa longa";document.querySelectorAll("[data-mode]").forEach(b=>b.classList.toggle("active",b.dataset.mode===m));renderClock()}
+function setAdminUI(){
+    $("adminLogin").hidden=isAdmin;
+    $("adminTools").hidden=!isAdmin;
+    $("manageTab").hidden=!isAdmin;
+    if(isAdmin) $("adminIdentity").textContent="Conectado: "+(currentUser?.email||"administrador");
+    refresh();
+}
+async function deletePhoto(id){
+    const p=photos.find(x=>x.id===id);
+    if(!p || !supabase || !isAdmin) return;
+    const {error}=await supabase.from("photocards").delete().eq("id",id);
+    if(error){alert("Erro ao remover: "+error.message);return;}
+    if(p.storage_path){
+        const {error:storageError}=await supabase.storage.from(STORAGE_BUCKET).remove([p.storage_path]);
+        if(storageError) console.warn("Registro removido, mas o arquivo ficou no Storage:",storageError.message);
+    }
+    await loadPhotos();
+}
+async function loadPhotos(){
+    if(!supabase) return;
+    const {data,error}=await supabase.from("photocards").select("*").order("created_at",{ascending:true});
+    if(error){
+        console.error("Erro ao carregar photocards:",error);
+        photos=[];
+        $("collectionGrid").innerHTML=`<div class="empty" style="grid-column:1/-1">Não foi possível carregar o álbum. Verifique a tabela, o bucket e as políticas do Supabase.</div>`;
+        refresh();
+        return;
+    }
+    photos=(data||[]).map(p=>({...p,url:p.storage_path?supabase.storage.from(STORAGE_BUCKET).getPublicUrl(p.storage_path).data.publicUrl:""}));
+    refresh();
+}
+async function checkAdmin(session){
+    currentUser=session?.user||null;
+    // O papel deve ser definido no app_metadata pelo administrador do projeto,
+    // nunca por um campo editável pelo próprio usuário.
+    isAdmin=!!currentUser && currentUser.app_metadata?.role==="admin";
+    setAdminUI();
+    if(currentUser&&!isAdmin){
+        $("loginStatus").textContent="Esta conta não tem permissão administrativa.";
+        await supabase.auth.signOut();
+        currentUser=null; isAdmin=false; setAdminUI();
+    }
+}
+async function uploadPhotos(){
+    if(!supabase || !isAdmin){$("uploadStatus").textContent="Entre com uma conta administradora antes de enviar fotos.";return;}
+    const files=[...$("photoFiles").files], member=$("uploadMember").value;
+    if(!files.length){$("uploadStatus").textContent="Escolha pelo menos uma imagem.";return;}
+    $("uploadBtn").disabled=true;
+    let added=0, failed=0;
+    try {
+        for(const f of files){
+            if(!f.type.startsWith("image/")){failed++;continue;}
+            try {
+                const safe=f.name.normalize("NFKD").replace(/[^a-zA-Z0-9._-]/g,"-");
+                const path=`${crypto.randomUUID()}-${safe}`;
+                const up=await supabase.storage.from(STORAGE_BUCKET).upload(path,f,{contentType:f.type,upsert:false});
+                if(up.error) throw up.error;
+                const row=await supabase.from("photocards").insert({member,name:f.name,storage_path:path,rarity:$("uploadRarity").value});
+                if(row.error){await supabase.storage.from(STORAGE_BUCKET).remove([path]);throw row.error;}
+                added++;
+            } catch(e){console.error("Falha no envio:",e);failed++;}
+        }
+    } finally {
+        $("uploadBtn").disabled=false;
+        $("photoFiles").value="";
+    }
+    $("uploadStatus").textContent=`${added} photocard(s) adicionado(s)!`+(failed?` ${failed} arquivo(s) falharam.`:"");
+    await loadPhotos();
+}
+function setMode(m){
+    pause(); mode=m;
+    const focusMinutes=Math.min(180,Math.max(1,Number($("focusLength").value)||25));
+    $("focusLength").value=focusMinutes;
+    const mins=m==="focus"?focusMinutes:m==="short"?5:15;
+    remaining=mins*60;
+    $("modeTitle").textContent=m==="focus"?"Hora de estudar":m==="short"?"Pausa curta":"Pausa longa";
+    $("startBtn").textContent="Começar";
+    document.querySelectorAll("[data-mode]").forEach(b=>b.classList.toggle("active",b.dataset.mode===m));
+    renderClock();
+}
 function renderClock(){$("clock").textContent=String(Math.floor(remaining/60)).padStart(2,"0")+":"+String(remaining%60).padStart(2,"0");document.title=$("clock").textContent+" · RIIZE Pomodoro"}
 function pause(){if(interval)clearInterval(interval);interval=null;running=false;$("startBtn").textContent="Continuar"}
 function start(){if(running)return;running=true;$("startBtn").textContent="Pausar";interval=setInterval(()=>{remaining--;renderClock();if(remaining<=0){pause();complete()}},1000)}
-function reset(){pause();remaining=(mode==="focus"?Number($("focusLength").value||25):mode==="short"?5:15)*60;renderClock();$("startBtn").textContent="Começar"}
+function reset(){pause();const focusMinutes=Math.min(180,Math.max(1,Number($("focusLength").value)||25));$("focusLength").value=focusMinutes;remaining=(mode==="focus"?focusMinutes:mode==="short"?5:15)*60;renderClock();$("startBtn").textContent="Começar"}
 function complete(){if(mode==="focus"){sessions++;totalMinutes+=Number($("focusLength").value||25);saveStats();updateStats();if(!photos.length){alert("Pomodoro concluído! O álbum ainda não tem photocards para sortear.");setMode("short");return}let rarity=rarityFor();let pool=photos.filter(x=>x.rarity===rarity);if(!pool.length)pool=photos;let p=pool[Math.floor(Math.random()*pool.length)];if(owned[p.id])duplicates++;owned[p.id]=(owned[p.id]||0)+1;saveStats();updateStats();$("rewardCard").innerHTML=`<div class="card" style="width:220px;margin:auto">${cardVisual(p)}<div class="card-meta"><b>${p.member}</b><small class="rarity">${p.rarity||rarity}</small></div></div>`;$("rewardNote").textContent=owned[p.id]>1?"Você tirou um repetido! Ele foi registrado na sua coleção.":"Novo photocard adicionado à sua coleção!";$("rewardOverlay").classList.add("show");refresh()}else alert("Pausa concluída. Bom trabalho!");setMode(mode==="focus"?"short":"focus")}
 $("startBtn").onclick=()=>running?pause():start();$("resetBtn").onclick=reset;$("focusLength").onchange=()=>{if(mode==="focus"&&!running)reset()};document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x===b));document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id===b.dataset.page))});
 $("closeReward").onclick=()=>$("rewardOverlay").classList.remove("show");
 $("uploadMember").innerHTML=MEMBERS.map(m=>`<option>${m}</option>`).join("");
 $("uploadBtn").onclick=uploadPhotos;
-$("loginBtn").onclick=async()=>{const email=$("adminEmail").value.trim(),password=$("adminPassword").value;$("loginStatus").textContent="Verificando acesso…";const {data,error}=await supabase.auth.signInWithPassword({email,password});if(error){$("loginStatus").textContent="Não foi possível entrar. Confira e-mail e senha.";return}await checkAdmin(data.session)};
+$("loginBtn").onclick=async()=>{
+    if(!supabase){$("loginStatus").textContent="O Supabase não foi inicializado. Confira a configuração e recarregue a página.";return;}
+    const email=$("adminEmail").value.trim(), password=$("adminPassword").value;
+    if(!email || !password){$("loginStatus").textContent="Informe e-mail e senha.";return;}
+    $("loginBtn").disabled=true; $("loginStatus").textContent="Verificando acesso…";
+    try {
+        const {data,error}=await supabase.auth.signInWithPassword({email,password});
+        if(error) throw error;
+        await checkAdmin(data.session);
+    } catch(error){
+        console.error("Erro no login:",error);
+        $("loginStatus").textContent="Não foi possível entrar. Confira e-mail, senha e configuração do Supabase.";
+    } finally { $("loginBtn").disabled=false; }
+};
 $("logoutBtn").onclick=async()=>{await supabase.auth.signOut();};
-async function init(){loadStats();setMode("focus");drawPlayer();refresh();if(!window.supabase||SUPABASE_URL.includes("https://gkmtajjoglmadojwuzfp.supabase.co")||SUPABASE_ANON_KEY.includes("sb_publishable_7xDLD2_I8MAg7KnKj5PRrg_OGt3lY9b")){$("loginStatus").textContent="Configure SUPABASE_URL e SUPABASE_ANON_KEY no início do arquivo para ativar o site.";return}supabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);const {data:{session}}=await supabase.auth.getSession();await checkAdmin(session);supabase.auth.onAuthStateChange((_event,s)=>{setTimeout(()=>checkAdmin(s),0)});await loadPhotos();realtimeChannel=supabase.channel("public-photocards").on("postgres_changes",{event:"*",schema:"public",table:"photocards"},()=>loadPhotos()).subscribe();}
+async function init(){
+    loadStats();
+    setMode("focus");
+    drawPlayer();
+    refresh();
+
+    if(!window.supabase || !SUPABASE_URL || !SUPABASE_ANON_KEY || !STORAGE_BUCKET){
+        $("loginStatus").textContent="Configure o Supabase para ativar o site.";
+        return;
+    }
+
+    try {
+        supabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+        const {data,error}=await supabase.auth.getSession();
+        if(error) throw error;
+        await checkAdmin(data.session);
+        supabase.auth.onAuthStateChange((_event,session)=>{
+            setTimeout(()=>checkAdmin(session),0);
+        });
+        await loadPhotos();
+        realtimeChannel=supabase
+            .channel("public-photocards")
+            .on("postgres_changes",{event:"*",schema:"public",table:"photocards"},()=>loadPhotos())
+            .subscribe();
+    } catch(error){
+        console.error("Erro na inicialização:",error);
+        $("loginStatus").textContent="Erro ao conectar ao Supabase: "+error.message;
+    }
+}
 setTimeout(init,0);
 </script>
 </body>
