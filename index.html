@@ -79,8 +79,16 @@ footer{text-align:center;color:#a8917a;font-size:10px;margin-top:35px;line-heigh
 const SUPABASE_URL = "https://gkmtajjoglmadojwuzfp.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_7xDLD2_I8MAg7KnKj5PRrg_OGt3lY9b";
 const STORAGE_BUCKET = "photocards";
-// Troque pelo mesmo e-mail autorizado nas políticas SQL do Supabase.
-const ADMIN_EMAILS = ["carolhpmendonca@gmail.com"];
+// Esta lista controla a interface; as políticas RLS do Supabase também
+// precisam autorizar os administradores para permitir alterações no banco.
+const ADMIN_EMAILS = ["carolhpmendonca@gmail.com", "art.tauria@gmail.com"];
+const ADMIN_UIDS = ["c38d0262-6de0-4a02-8a65-8a9faadd72f6"];
+function isAdminUser(user){
+  return !!user && (
+    ADMIN_UIDS.includes(user.id) ||
+    ADMIN_EMAILS.includes((user.email||"").toLowerCase())
+  );
+}
 
 const MEMBERS=["SHOTARO","EUNSEOK","SUNGCHAN","WONBIN","SOHEE","ANTON"];
 const EMOJI={SHOTARO:"🧋",EUNSEOK:"🪨",SUNGCHAN:"🦌",WONBIN:"🎸",SOHEE:"💂",ANTON:"🦖"};
@@ -349,13 +357,13 @@ async function init(){
  supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
  try{
   const {data:{session},error}=await supabaseClient.auth.getSession();if(error)throw error;
-  currentUser=session?.user||null;isAdmin=!!currentUser&&ADMIN_EMAILS.includes((currentUser.email||"").toLowerCase());
+  currentUser=session?.user||null;isAdmin=isAdminUser(currentUser);
   setUserUI();setAdminUI();
   if(isAdmin)showAuthStatus("Acesso de administradora ativo.");else showAuthStatus("A área de administração é exclusiva.");
   await loadPhotos();await loadUserData();
   photoChannel=supabaseClient.channel("photocards-changes").on("postgres_changes",{event:"*",schema:"public",table:"photocards"},()=>loadPhotos().catch(console.error)).subscribe();
   supabaseClient.auth.onAuthStateChange((_event,sessionNow)=>{
-   currentUser=sessionNow?.user||null;isAdmin=!!currentUser&&ADMIN_EMAILS.includes((currentUser.email||"").toLowerCase());
+   currentUser=sessionNow?.user||null;isAdmin=isAdminUser(currentUser);
    setUserUI();setAdminUI();if(isAdmin)showAuthStatus("Acesso de administradora ativo.");else showAuthStatus("");
    setTimeout(()=>loadUserData().catch(e=>console.error("Falha ao carregar coleção:",e)),0);
   });
