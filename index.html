@@ -137,9 +137,11 @@ function drawCollection(){
   $("collectionGrid").innerHTML=filtered.length?filtered.map(p=>`<div class="card">${cardVisual(p)}<div class="card-meta"><b>${escapeHTML(p.member)}</b><small>${owned[p.id]?"Recebido ×"+owned[p.id]:"Ainda não recebido"}</small><span class="rarity">${escapeHTML(p.rarity||"Surpresa")}</span></div></div>`).join(""):`<div class="empty" style="grid-column:1/-1">${emptyMsg()}</div>`;
 }
 function drawAvailable(){
-  $("availableGrid").innerHTML=photos.length?photos.map(p=>`<div class="card">${cardVisual(p)}<div class="card-meta"><b>${escapeHTML(p.member)}</b><select data-rarity="${escapeHTML(p.id)}" style="margin-top:5px;width:100%;padding:5px;border:1px solid var(--line);border-radius:8px;font-size:10px;background:white;color:var(--ink)">${RARITIES.map(r=>`<option${r===p.rarity?" selected":""}>${r}</option>`).join("")}</select><button class="secondary" style="padding:6px 9px;margin-top:7px;font-size:10px" data-delete="${escapeHTML(p.id)}">Remover</button></div></div>`).join(""):`<div class="empty" style="grid-column:1/-1">${emptyMsg()}</div>`;
-  document.querySelectorAll("[data-delete]").forEach(b=>b.onclick=()=>deletePhoto(b.dataset.delete));
-  document.querySelectorAll("[data-rarity]").forEach(sel=>sel.onchange=()=>updateRarity(sel.dataset.rarity,sel.value));
+  $("availableGrid").innerHTML=photos.length?photos.map(p=>`<div class="card">${cardVisual(p)}<div class="card-meta"><b>${escapeHTML(p.member)}</b>${isAdmin?`<select data-rarity="${escapeHTML(p.id)}" style="margin-top:5px;width:100%;padding:5px;border:1px solid var(--line);border-radius:8px;font-size:10px;background:white;color:var(--ink)">${RARITIES.map(r=>`<option${r===p.rarity?" selected":""}>${r}</option>`).join("")}</select><button class="secondary" style="padding:6px 9px;margin-top:7px;font-size:10px" data-delete="${escapeHTML(p.id)}">Remover</button>`:`<small>${escapeHTML(p.rarity||"Common")} · card oficial</small>`}</div></div>`).join(""):`<div class="empty" style="grid-column:1/-1">${emptyMsg()}</div>`;
+  if(isAdmin){
+    document.querySelectorAll("[data-delete]").forEach(b=>b.onclick=()=>deletePhoto(b.dataset.delete));
+    document.querySelectorAll("[data-rarity]").forEach(sel=>sel.onchange=()=>updateRarity(sel.dataset.rarity,sel.value));
+  }
 }
 function refresh(){drawPlayer();drawCoverage();drawMembers();drawCollection();drawAvailable();updateStats()}
 function drawPlayer(){
@@ -191,6 +193,9 @@ function setAdminUI(){
   $("loginBtn").hidden=!!currentUser;
   $("logoutBtn").hidden=!currentUser;
   $("uploadBox").hidden=!isAdmin;
+  // Atualiza a lista imediatamente após login/logout para mostrar controles
+  // somente quando a sessão pertence à administradora.
+  drawAvailable();
 }
 function showAuthStatus(message,isError=false){
   $("authStatus").textContent=message;
@@ -228,6 +233,7 @@ async function loadPhotos(){
   refresh();
 }
 async function uploadPhotos(){
+  if(!isAdmin){alert("Somente a administradora pode adicionar ou alterar cards oficiais.");return}
   const files=[...$("photoFiles").files],member=$("uploadMember").value,rarity=$("uploadRarity").value;
   if(!files.length){$("uploadStatus").textContent="Escolha pelo menos uma imagem.";return}
   if(!currentUser){$("uploadStatus").textContent="Faça login novamente com o e-mail administrador.";return}
@@ -254,6 +260,7 @@ async function uploadPhotos(){
   try{await loadPhotos()}catch(e){console.error("Erro ao atualizar coleção:",e);$("uploadStatus").textContent+=`\nO upload foi processado, mas a lista não atualizou: ${e.message||e}`}
 }
 async function deletePhoto(id){
+  if(!isAdmin){alert("Somente a administradora pode remover cards oficiais.");return}
   const p=photos.find(x=>x.id===id);if(!p)return;
   if(!confirm("Remover este photocard do álbum compartilhado?"))return;
   try{
@@ -264,6 +271,7 @@ async function deletePhoto(id){
   }catch(e){console.error(e);alert("Não foi possível remover. Verifique as permissões do Supabase.")}
 }
 async function updateRarity(id,rarity){
+  if(!isAdmin){alert("Somente a administradora pode alterar cards oficiais.");return}
   const {error}=await supabaseClient.from("photocards").update({rarity}).eq("id",id);
   if(error){console.error(error);alert("Não foi possível alterar a raridade. Verifique as permissões.");}
   else await loadPhotos();
